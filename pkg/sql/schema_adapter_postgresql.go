@@ -1,9 +1,9 @@
 package sql
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"strings"
 
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -210,7 +210,7 @@ func (s DefaultPostgreSQLSchema) PayloadColumnType(topic string) string {
 	return s.GeneratePayloadType(topic)
 }
 
-func (s DefaultPostgreSQLSchema) SubscribeIsolationLevel() sql.IsolationLevel {
+func (s DefaultPostgreSQLSchema) SubscribeIsolationLevel() pgx.TxIsoLevel {
 	// For Postgres Repeatable Read is enough.
-	return sql.LevelRepeatableRead
+	return pgx.RepeatableRead
 }

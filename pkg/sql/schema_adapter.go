@@ -1,9 +1,9 @@
 package sql
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/ThreeDotsLabs/watermill/message"
 )
@@ -27,11 +27,11 @@ type SchemaAdapter interface {
 	SchemaInitializingQueries(topic string) []Query
 
 	// SubscribeIsolationLevel returns the isolation level that will be used when subscribing.
-	SubscribeIsolationLevel() sql.IsolationLevel
+	SubscribeIsolationLevel() pgx.TxIsoLevel
 }
 
 // Deprecated: Use DefaultMySQLSchema instead.
-type DefaultSchema = DefaultMySQLSchema
+type DefaultSchema = DefaultPostgreSQLSchema
 
 type Row struct {
 	Offset   int64

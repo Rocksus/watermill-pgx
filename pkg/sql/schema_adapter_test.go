@@ -8,62 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill-sql/v3/pkg/sql"
 	"github.com/ThreeDotsLabs/watermill/message"
+	"github.com/davideimola/watermill-pgx/pkg/sql"
 )
-
-// TestDefaultMySQLSchema checks if the SQL schema defined in DefaultMySQLSchema is correctly executed
-// and if message marshaling works as intended.
-func TestDefaultMySQLSchema(t *testing.T) {
-	db := newMySQL(t)
-
-	publisher, err := sql.NewPublisher(db, sql.PublisherConfig{
-		SchemaAdapter:        sql.DefaultMySQLSchema{},
-		AutoInitializeSchema: true,
-	}, logger)
-	require.NoError(t, err)
-
-	subscriber, err := sql.NewSubscriber(db, sql.SubscriberConfig{
-		SchemaAdapter:    sql.DefaultMySQLSchema{},
-		OffsetsAdapter:   sql.DefaultMySQLOffsetsAdapter{},
-		InitializeSchema: true,
-	}, logger)
-	require.NoError(t, err)
-
-	testOneMessage(t, publisher, subscriber)
-}
-
-func TestDefaultMySQLSchema_implicit_commit_warning(t *testing.T) {
-	db := newMySQL(t)
-	tx, err := db.Begin()
-	require.NoError(t, err)
-
-	schemaAdapter := sql.DefaultMySQLSchema{}
-	_, err = sql.NewPublisher(tx, sql.PublisherConfig{
-		SchemaAdapter:        schemaAdapter,
-		AutoInitializeSchema: true,
-	}, logger)
-	require.Error(t, err, "used auto schema initializing without a separate db handle for the adapter, "+
-		"expected error from publisher constructor")
-}
-
-func TestDefaultMySQLSchema_implicit_commit(t *testing.T) {
-	db := newMySQL(t)
-	tx, err := db.Begin()
-	require.NoError(t, err)
-
-	schemaAdapter := sql.DefaultMySQLSchema{}
-	_, err = sql.NewPublisher(tx, sql.PublisherConfig{
-		SchemaAdapter:        schemaAdapter,
-		AutoInitializeSchema: true,
-	}, logger)
-	require.Error(t, err, "expecting error with AutoInitializeSchema and db handle which is a tx")
-}
 
 // TestDefaultPostgreSQLSchema checks if the SQL schema defined in DefaultPostgreSQLSchema is correctly executed
 // and if message marshaling works as intended.
 func TestDefaultPostgreSQLSchema(t *testing.T) {
-	db := newPostgreSQL(t)
+	db := newPgxPostgreSQL(t)
 
 	publisher, err := sql.NewPublisher(db, sql.PublisherConfig{
 		SchemaAdapter:        sql.DefaultPostgreSQLSchema{},

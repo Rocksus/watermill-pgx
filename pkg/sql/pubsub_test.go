@@ -2,8 +2,9 @@ package sql_test
 
 import (
 	"context"
-	stdSQL "database/sql"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"regexp"
 	"strconv"
@@ -11,13 +12,10 @@ import (
 	"time"
 
 	"github.com/ThreeDotsLabs/watermill"
-	"github.com/ThreeDotsLabs/watermill-sql/v3/pkg/sql"
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/subscriber"
 	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
-	driver "github.com/go-sql-driver/mysql"
-	"github.com/jackc/pgx/v4"
-	"github.com/jackc/pgx/v4/stdlib"
+	"github.com/davideimola/watermill-pgx/pkg/sql"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,7 +25,7 @@ var (
 	logger = watermill.NewStdLogger(true, false)
 )
 
-func newPubSub(t *testing.T, db *stdSQL.DB, consumerGroup string, schemaAdapter sql.SchemaAdapter, offsetsAdapter sql.OffsetsAdapter) (message.Publisher, message.Subscriber) {
+func newPubSub(t *testing.T, db *pgxpool.Pool, consumerGroup string, schemaAdapter sql.SchemaAdapter, offsetsAdapter sql.OffsetsAdapter) (message.Publisher, message.Subscriber) {
 	publisher, err := sql.NewPublisher(
 		db,
 		sql.PublisherConfig{
@@ -54,100 +52,28 @@ func newPubSub(t *testing.T, db *stdSQL.DB, consumerGroup string, schemaAdapter 
 	return publisher, subscriber
 }
 
-func newMySQL(t *testing.T) *stdSQL.DB {
-	addr := os.Getenv("WATERMILL_TEST_MYSQL_HOST")
-	if addr == "" {
-		addr = "localhost"
-	}
-	conf := driver.NewConfig()
-	conf.Net = "tcp"
-	conf.User = "root"
-	conf.Addr = addr
-
-	conf.DBName = "watermill"
-
-	db, err := stdSQL.Open("mysql", conf.FormatDSN())
-	require.NoError(t, err)
-
-	err = db.Ping()
-	require.NoError(t, err)
-
-	return db
-}
-
-func newPostgreSQL(t *testing.T) *stdSQL.DB {
+func newPgxPostgreSQL(t *testing.T) *pgxpool.Pool {
 	addr := os.Getenv("WATERMILL_TEST_POSTGRES_HOST")
 	if addr == "" {
 		addr = "localhost"
 	}
 
 	connStr := fmt.Sprintf("postgres://watermill:password@%s/watermill?sslmode=disable", addr)
-	db, err := stdSQL.Open("postgres", connStr)
+	conf, err := pgxpool.ParseConfig(connStr)
 	require.NoError(t, err)
 
-	err = db.Ping()
-	require.NoError(t, err)
+	db, err := pgxpool.NewWithConfig(context.Background(), conf)
 
-	return db
-}
-
-func newPgxPostgreSQL(t *testing.T) *stdSQL.DB {
-	addr := os.Getenv("WATERMILL_TEST_POSTGRES_HOST")
-	if addr == "" {
-		addr = "localhost"
-	}
-
-	connStr := fmt.Sprintf("postgres://watermill:password@%s/watermill?sslmode=disable", addr)
-	conf, err := pgx.ParseConfig(connStr)
-	require.NoError(t, err)
-
-	db := stdlib.OpenDB(*conf)
-
-	err = db.Ping()
+	err = db.Ping(context.Background())
 	require.NoError(t, err)
 
 	return db
-}
-
-func createMySQLPubSubWithConsumerGroup(t *testing.T, consumerGroup string) (message.Publisher, message.Subscriber) {
-	return newPubSub(
-		t,
-		newMySQL(t),
-		consumerGroup,
-		newMySQLSchemaAdapter(0),
-		newMySQLOffsetsAdapter(),
-	)
-}
-
-func newMySQLOffsetsAdapter() sql.DefaultMySQLOffsetsAdapter {
-	return sql.DefaultMySQLOffsetsAdapter{
-		GenerateMessagesOffsetsTableName: func(topic string) string {
-			return fmt.Sprintf("`test_offsets_%s`", topic)
-		},
-	}
-}
-
-func newMySQLSchemaAdapter(batchSize int) *sql.DefaultMySQLSchema {
-	return &sql.DefaultMySQLSchema{
-		GenerateMessagesTableName: func(topic string) string {
-			return fmt.Sprintf("`test_%s`", topic)
-		},
-		GeneratePayloadType: func(topic string) string {
-			// payload is a VARBINARY(255) instead of JSON; tests don't presuppose JSON-marshallable payloads
-			return "VARBINARY(255)"
-		},
-		SubscribeBatchSize: batchSize,
-	}
-}
-
-func createMySQLPubSub(t *testing.T) (message.Publisher, message.Subscriber) {
-	return createMySQLPubSubWithConsumerGroup(t, "test")
 }
 
 func createPostgreSQLPubSubWithConsumerGroup(t *testing.T, consumerGroup string) (message.Publisher, message.Subscriber) {
 	return newPubSub(
 		t,
-		newPostgreSQL(t),
+		newPgxPostgreSQL(t),
 		consumerGroup,
 		newPostgresSchemaAdapter(0),
 		newPostgresOffsetsAdapter(),
@@ -201,24 +127,6 @@ func createPgxPostgreSQLPubSub(t *testing.T) (message.Publisher, message.Subscri
 	return createPgxPostgreSQLPubSubWithConsumerGroup(t, "test")
 }
 
-func TestMySQLPublishSubscribe(t *testing.T) {
-	t.Parallel()
-
-	features := tests.Features{
-		ConsumerGroups:      true,
-		ExactlyOnceDelivery: true,
-		GuaranteedOrder:     true,
-		Persistent:          true,
-	}
-
-	tests.TestPubSub(
-		t,
-		features,
-		createMySQLPubSub,
-		createMySQLPubSubWithConsumerGroup,
-	)
-}
-
 func TestPostgreSQLPublishSubscribe(t *testing.T) {
 	t.Parallel()
 
@@ -261,10 +169,6 @@ func TestCtxValues(t *testing.T) {
 		Constructor func(t *testing.T) (message.Publisher, message.Subscriber)
 	}{
 		{
-			Name:        "mysql",
-			Constructor: createMySQLPubSub,
-		},
-		{
 			Name:        "postgresql",
 			Constructor: createPostgreSQLPubSub,
 		},
@@ -299,7 +203,6 @@ func TestCtxValues(t *testing.T) {
 				tx, ok := sql.TxFromContext(msg.Context())
 				assert.True(t, ok)
 				assert.NotNil(t, t, tx)
-				assert.IsType(t, &stdSQL.Tx{}, tx)
 				msg.Ack()
 			case <-time.After(time.Second * 10):
 				t.Fatal("no message received")
@@ -315,19 +218,13 @@ func TestNotMissingMessages(t *testing.T) {
 
 	pubSubs := []struct {
 		Name           string
-		DbConstructor  func(t *testing.T) *stdSQL.DB
+		DbConstructor  func(t *testing.T) *pgxpool.Pool
 		SchemaAdapter  sql.SchemaAdapter
 		OffsetsAdapter sql.OffsetsAdapter
 	}{
 		{
-			Name:           "mysql",
-			DbConstructor:  newMySQL,
-			SchemaAdapter:  newMySQLSchemaAdapter(0),
-			OffsetsAdapter: newMySQLOffsetsAdapter(),
-		},
-		{
 			Name:           "postgresql",
-			DbConstructor:  newPostgreSQL,
+			DbConstructor:  newPgxPostgreSQL,
 			SchemaAdapter:  newPostgresSchemaAdapter(0),
 			OffsetsAdapter: newPostgresOffsetsAdapter(),
 		},
@@ -383,19 +280,27 @@ func TestNotMissingMessages(t *testing.T) {
 				tests.AssertAllMessagesReceived(t, messagesToPublish, received)
 			}()
 
-			tx0, err := db.BeginTx(ctx, &stdSQL.TxOptions{Isolation: stdSQL.LevelReadCommitted})
+			tx0, err := db.BeginTx(ctx, pgx.TxOptions{
+				IsoLevel: pgx.ReadCommitted,
+			})
 			assert.NoError(t, err)
 			time.Sleep(time.Millisecond * 10)
 
-			tx1, err := db.BeginTx(ctx, &stdSQL.TxOptions{Isolation: stdSQL.LevelReadCommitted})
+			tx1, err := db.BeginTx(ctx, pgx.TxOptions{
+				IsoLevel: pgx.ReadCommitted,
+			})
 			assert.NoError(t, err)
 			time.Sleep(time.Millisecond * 10)
 
-			txRollback, err := db.BeginTx(ctx, &stdSQL.TxOptions{Isolation: stdSQL.LevelReadCommitted})
+			txRollback, err := db.BeginTx(ctx, pgx.TxOptions{
+				IsoLevel: pgx.ReadCommitted,
+			})
 			assert.NoError(t, err)
 			time.Sleep(time.Millisecond * 10)
 
-			tx2, err := db.BeginTx(ctx, &stdSQL.TxOptions{Isolation: stdSQL.LevelReadCommitted})
+			tx2, err := db.BeginTx(ctx, pgx.TxOptions{
+				IsoLevel: pgx.ReadCommitted,
+			})
 			assert.NoError(t, err)
 			time.Sleep(time.Millisecond * 10)
 
@@ -443,16 +348,16 @@ func TestNotMissingMessages(t *testing.T) {
 			err = pub2.Publish(topicName, messagesToPublish[2])
 			require.NoError(t, err, "cannot publish message")
 
-			require.NoError(t, tx2.Commit())
+			require.NoError(t, tx2.Commit(ctx))
 			time.Sleep(time.Millisecond * 10)
 
-			require.NoError(t, txRollback.Rollback())
+			require.NoError(t, txRollback.Rollback(ctx))
 			time.Sleep(time.Millisecond * 10)
 
-			require.NoError(t, tx1.Commit())
+			require.NoError(t, tx1.Commit(ctx))
 			time.Sleep(time.Millisecond * 10)
 
-			require.NoError(t, tx0.Commit())
+			require.NoError(t, tx0.Commit(ctx))
 			time.Sleep(time.Millisecond * 10)
 
 			<-messagesAsserted
@@ -469,37 +374,11 @@ func TestConcurrentSubscribe_different_bulk_sizes(t *testing.T) {
 		Test        func(t *testing.T, tCtx tests.TestContext, pubSubConstructor tests.PubSubConstructor)
 	}{
 		{
-			Name: "TestPublishSubscribe_mysql_1",
-			Constructor: func(t *testing.T) (message.Publisher, message.Subscriber) {
-				return newPubSub(
-					t,
-					newMySQL(t),
-					"test",
-					newMySQLSchemaAdapter(1),
-					newMySQLOffsetsAdapter(),
-				)
-			},
-			Test: tests.TestPublishSubscribe,
-		},
-		{
-			Name: "TestConcurrentSubscribe_mysql_5",
-			Constructor: func(t *testing.T) (message.Publisher, message.Subscriber) {
-				return newPubSub(
-					t,
-					newMySQL(t),
-					"test",
-					newMySQLSchemaAdapter(5),
-					newMySQLOffsetsAdapter(),
-				)
-			},
-			Test: tests.TestConcurrentSubscribe,
-		},
-		{
 			Name: "TestConcurrentSubscribe_postgresql_1",
 			Constructor: func(t *testing.T) (message.Publisher, message.Subscriber) {
 				return newPubSub(
 					t,
-					newPostgreSQL(t),
+					newPgxPostgreSQL(t),
 					"test",
 					newPostgresSchemaAdapter(1),
 					newPostgresOffsetsAdapter(),
@@ -512,7 +391,7 @@ func TestConcurrentSubscribe_different_bulk_sizes(t *testing.T) {
 			Constructor: func(t *testing.T) (message.Publisher, message.Subscriber) {
 				return newPubSub(
 					t,
-					newPostgreSQL(t),
+					newPgxPostgreSQL(t),
 					"test",
 					newPostgresSchemaAdapter(5),
 					newPostgresOffsetsAdapter(),
@@ -548,7 +427,7 @@ func TestConcurrentSubscribe_different_bulk_sizes(t *testing.T) {
 func TestDefaultPostgreSQLSchema_planner_mis_estimate_regression(t *testing.T) {
 	// this test should be not executed in Parallel to not disturb performance measurements
 
-	db := newPostgreSQL(t)
+	db := newPgxPostgreSQL(t)
 
 	offsetsAdapter := newPostgresOffsetsAdapter()
 
@@ -590,7 +469,7 @@ func TestDefaultPostgreSQLSchema_planner_mis_estimate_regression(t *testing.T) {
 
 	var analyseResult string
 
-	res, err := db.Query("EXPLAIN ANALYZE\n"+q.Query, q.Args...)
+	res, err := db.Query(context.Background(), "EXPLAIN ANALYZE\n"+q.Query, q.Args...)
 	require.NoError(t, err)
 
 	for res.Next() {
@@ -599,7 +478,7 @@ func TestDefaultPostgreSQLSchema_planner_mis_estimate_regression(t *testing.T) {
 		require.NoError(t, err)
 		analyseResult += line + "\n"
 	}
-	require.NoError(t, res.Close())
+	res.Close()
 
 	t.Log(analyseResult)
 
