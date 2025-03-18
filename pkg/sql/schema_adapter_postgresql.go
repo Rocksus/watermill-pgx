@@ -1,9 +1,12 @@
 package sql
 
 import (
+	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"strconv"
 	"strings"
 
 	"github.com/ThreeDotsLabs/watermill/message"
@@ -146,7 +149,7 @@ func (s DefaultPostgreSQLSchema) SelectQuery(topic string, consumerGroup string,
 			` + nextOffsetQuery.Query + `
 		)
 
-		SELECT "offset", transaction_id, uuid, payload, metadata FROM ` + s.MessagesTable(topic) + `
+		SELECT "offset", transaction_id::text, uuid, payload, metadata FROM ` + s.MessagesTable(topic) + `
 
 		WHERE 
 		(
@@ -171,7 +174,7 @@ func (s DefaultPostgreSQLSchema) SelectQuery(topic string, consumerGroup string,
 
 func (s DefaultPostgreSQLSchema) UnmarshalMessage(row Scanner) (Row, error) {
 	r := Row{}
-	var transactionID int64
+	var transactionID XID8
 
 	err := row.Scan(&r.Offset, &transactionID, &r.UUID, &r.Payload, &r.Metadata)
 	if err != nil {
@@ -213,4 +216,35 @@ func (s DefaultPostgreSQLSchema) PayloadColumnType(topic string) string {
 func (s DefaultPostgreSQLSchema) SubscribeIsolationLevel() pgx.TxIsoLevel {
 	// For Postgres Repeatable Read is enough.
 	return pgx.RepeatableRead
+}
+
+type XID8 uint64
+
+func (x *XID8) Scan(src interface{}) error {
+	if src == nil {
+		return errors.New("cannot scan nil value into XID8")
+	}
+
+	switch v := src.(type) {
+	case string:
+		val, err := strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return err
+		}
+		*x = XID8(val)
+		return nil
+	case []byte:
+		val, err := strconv.ParseUint(string(v), 10, 64)
+		if err != nil {
+			return err
+		}
+		*x = XID8(val)
+		return nil
+	default:
+		return errors.New("unsupported Scan value type for XID8")
+	}
+}
+
+func (x *XID8) Value() (driver.Value, error) {
+	return uint64(*x), nil
 }
