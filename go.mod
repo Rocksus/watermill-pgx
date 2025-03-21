@@ -1,4 +1,4 @@
-module github.com/davideimola/watermill-pgx
+module github.com/rocksus/watermill-pgx
 
 go 1.21
 
