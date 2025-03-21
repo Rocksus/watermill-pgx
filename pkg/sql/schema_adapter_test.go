@@ -9,7 +9,7 @@ import (
 
 	"github.com/ThreeDotsLabs/watermill"
 	"github.com/ThreeDotsLabs/watermill/message"
-	"github.com/davideimola/watermill-pgx/pkg/sql"
+	"github.com/rocksus/watermill-pgx/pkg/sql"
 )
 
 // TestDefaultPostgreSQLSchema checks if the SQL schema defined in DefaultPostgreSQLSchema is correctly executed

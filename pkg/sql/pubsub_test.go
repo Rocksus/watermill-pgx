@@ -15,7 +15,7 @@ import (
 	"github.com/ThreeDotsLabs/watermill/message"
 	"github.com/ThreeDotsLabs/watermill/message/subscriber"
 	"github.com/ThreeDotsLabs/watermill/pubsub/tests"
-	"github.com/davideimola/watermill-pgx/pkg/sql"
+	"github.com/rocksus/watermill-pgx/pkg/sql"
 	_ "github.com/lib/pq"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
